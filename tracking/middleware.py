@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import logging
 import re
 import traceback
-
+import pytz
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
@@ -57,18 +57,13 @@ class VisitorTrackingMiddleware(object):
     def process_request(self, request):
         # don't process AJAX requests
         if request.is_ajax(): return
-
         # create some useful variables
         ip_address = utils.get_ip(request)
         user_agent = unicode(request.META.get('HTTP_USER_AGENT', '')[:255], errors='ignore')
-
         # retrieve untracked user agents from cache
         ua_key = '_tracking_untracked_uas'
-        untracked = cache.get(ua_key)
-        if untracked is None:
-            log.info('Updating untracked user agent cache')
-            untracked = UntrackedUserAgent.objects.all()
-            cache.set(ua_key, untracked, 3600)
+        log.info('Updating untracked user agent cache')
+        untracked = UntrackedUserAgent.objects.all()
 
         # see if the user agent is not supposed to be tracked
         for ua in untracked:
@@ -136,6 +131,7 @@ class VisitorTrackingMiddleware(object):
         # if the visitor record is new, or the visitor hasn't been here for
         # at least an hour, update their referrer URL
         one_hour_ago = now - timedelta(hours=1)
+        one_hour_ago = pytz.UTC.localize(one_hour_ago)
         if not visitor.last_update or visitor.last_update <= one_hour_ago:
             visitor.referrer = utils.u_clean(request.META.get('HTTP_REFERER', 'unknown')[:255])
 
@@ -173,12 +169,8 @@ class BannedIPMiddleware:
 
     def process_request(self, request):
         key = '_tracking_banned_ips'
-        ips = cache.get(key)
-        if ips is None:
-            # compile a list of all banned IP addresses
-            log.info('Updating banned IPs cache')
-            ips = [b.ip_address for b in BannedIP.objects.all()]
-            cache.set(key, ips, 3600)
+        # compile a list of all banned IP addresses
+        ips = [b.ip_address for b in BannedIP.objects.all()]
 
         # check to see if the current user's IP address is in that list
         if utils.get_ip(request) in ips:
